@@ -91,7 +91,7 @@ Now (2026-05) ──┐
 
 ## 📧 Contact
 
-**Yuanjie Lin** (林源杰)
+**Jie Yuan** (袁捷)
 Wenzhou-Kean University · Department of Mathematical Sciences
 📩 [yuanjie@kean.edu](mailto:yuanjie@kean.edu)
 

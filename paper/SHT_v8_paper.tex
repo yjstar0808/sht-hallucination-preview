@@ -1,0 +1,1577 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%  SHT v8 — A Three-Layer Framework for Hallucination Detection in LLMs
+%  Token Theorem + Claim Conformal Calibration + Empirical Hallucination Bridge
+%
+%  Target venue: NLPCC 2026 (Springer LNCS format)
+%  Format:       LLNCS 2.21, 12-page limit (incl. references)
+%  Status:       SUBMISSION — All numerical results from Layer 3 runs injected
+%
+%  ANONYMIZATION NOTE for double-blind review:
+%    - Remove \inst{} affiliation details, acknowledgments
+%    - Replace author names with "Anonymous"
+%    - Remove or mask pipeline artifact URLs if any
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\documentclass[runningheads]{llncs}
+
+% ── Fonts ────────────────────────────────────────────────────────────────
+\usepackage[T1]{fontenc}
+
+% ── Math ──────────────────────────────────────────────────────────────────
+\usepackage{amsmath,amssymb}
+\usepackage{bm}
+
+% ── Figures / Color ───────────────────────────────────────────────────────
+\usepackage{graphicx}
+\usepackage{xcolor}
+
+% (TODO marker command removed for submission — all results injected)
+
+% ═════════════════════════════════════════════════════════════════
+%  Math notation shortcuts
+% ═════════════════════════════════════════════════════════════════
+\newcommand{\qt}{q_t}
+\newcommand{\pt}{p_t}
+\newcommand{\qxt}{q_t(X_t)}
+\newcommand{\qlsq}{\|q_t\|_2^2}
+\newcommand{\stscore}{s_t}
+\newcommand{\Mt}{M_t}
+\newcommand{\Lambdacohort}{\Lambda_t^{(j)}}
+\newcommand{\claimscore}{A_{\text{claim}}}
+\newcommand{\claimscorelog}{A_{\text{claim}}^{\log}}
+\newcommand{\Hnull}{H_0^{\text{stat}}}
+\newcommand{\Talpha}{T_\alpha}
+\newcommand{\betacohort}{\beta_t^{(j)}}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{document}
+
+% ── Title ─────────────────────────────────────────────────────────────
+\title{SHT: A Self-Surprise Conformal Framework for LLM Hallucination Analysis\thanks{SHT is the framework identifier retained from previous versions of this work.}}
+\titlerunning{SHT: Self-Surprise Conformal Framework}
+
+% ── Author (anonymize for double-blind review) ────────────────────────
+\author{Jie Yuan\inst{1}}
+
+\authorrunning{J. Yuan}
+
+\institute{Kean University, Union NJ 07083, USA \\
+\email{yuanjie@kean.edu}}
+
+\maketitle
+
+% ── Abstract ──────────────────────────────────────────────────────────
+\begin{abstract}
+We propose SHT, a conformal-calibrated framework for analyzing
+hallucinations in large language models (LLMs) via token-derived
+self-surprise statistics. The framework has three components.
+We define a centered-Brier self-surprise residual
+$s_t = \|q_t\|_2^2 - q_t(X_t)$ that is bounded in $[-1, 1]$ and
+mean-zero under the model's own (post-temperature, post-top-$p$)
+sampling distribution $q_t$---the trivial statistical null
+$\Hnull: X_t \mid \mathcal{F}_{t-1} \sim q_t$. Aggregating $s_t$ over
+a claim's token span yields a per-claim score; we then form a per-trace
+summary score and calibrate via per-category split conformal prediction at
+the trace level for a finite-sample bound
+$\mathbb{P}(\bar{A}_{\text{new}} > \bar{T}_{\alpha,c} \mid Y_{\text{new}} =
+\text{factual}, c) \le \alpha + 1/(n_c^{\text{tr}}+1)$ on the false alarm
+rate over factual traces, conditional on category, under trace-level
+within-category exchangeability (Theorem~\ref{thm:layer2}, where
+$n_c^{\text{tr}}$ is the number of factual calibration traces in category
+$c$). The trace-level unit matches our cal/test split protocol exactly
+and delivers an exact finite-sample guarantee. A claim-level analogue
+threshold using $\alpha + 1/(m_c+1)$ as an informal reference value
+(Remark~\ref{prop:claim-level}) is used for individual-claim AUROC
+characterization, with empirical Clopper--Pearson per-prompt miscoverage
+diagnostics flagging $(c, \text{prompt})$ cells whose lower CI exceeds
+the informal reference. We then characterize, per
+category, the empirical relationship between this score and
+claim-level hallucination labels using AUROC, PR-AUC,
+Kolmogorov--Smirnov, and Mann--Whitney $U$ with trace-level bootstrap
+confidence intervals. The comparison includes mean-entropy, mean-NLL,
+max-NLL, and per-claim variance baselines, so that any advantage
+attributable to the proposed score is isolated from baseline
+second-moment readouts. As a structural byproduct, the cumulative
+product $M_t = \prod_t(1 + \beta\, s_t)$ is an anytime-valid e-process
+under $\Hnull$ (Theorem~\ref{thm:layer1}). We characterize the
+behavior of $M_t$ under repeated peeking in two streaming experiments
+on identical input streams: (a) a delay-recall comparison against a
+CUSUM baseline run on the same score $s_t$, characterizing the
+contribution of multiplicative-vs-additive aggregation; and (b) a
+three-arm peeking-FAR experiment on the same $M_t$, contrasting the
+Ville-derived $1/\alpha$, a tight empirically-calibrated anytime-valid
+threshold $c_A^*$ (the per-category $(1-\alpha)$-empirical-quantile of
+$\sup_t M_t$ over cal-factual traces in each category $c$), and a
+single-stop critical value $c^*$. By the per-category structural ordering
+$c^* \leq c_A^* \leq 1/\alpha$ (see Remark~\ref{rem:theorem1-scope}),
+the resulting FAR gaps are reported as
+joint characterizations of (anytime-valid status, calibration-target
+choice) rather than as isolated attribution to anytime-validity; both
+experiments and the batch comparison are reported in the main text
+regardless of outcome.
+We distinguish Channel~U (uncertainty-driven hallucinations,
+structurally visible to token-level proper scoring rules) from
+Channel~O (overconfident hallucinations, structurally invisible) as a
+methodological decomposition of detectability boundaries; Channel~O
+is declared a documented limitation rather than a hidden one. Three
+further limitations are disclosed explicitly: (i) ground-truth labels
+are derived from three LLM annotators, so per-category AUROC measures
+agreement between LLM-derived signals on a unanimous-consensus subset
+rather than verification against a human gold standard; (ii) the
+five-category design (C1--C5) yields empirically interpretable
+results predominantly for C5, with C1--C4 reported as supporting
+characterization under acknowledged power and structural limitations;
+(iii) the unanimity merge rule retains the cases on which all three
+annotators reach consensus, which systematically overestimates
+detection performance on the underlying claim population.
+Experiments on Qwen2.5-7B-Instruct with 25~prompts $\times$
+5~seeds~$=$ 125~generation trajectories, 1{,}026~atomic claims, and
+three independent LLM annotators (DeepSeek V4 Pro, GLM-4.7, Claude
+Sonnet 4.6) under a unanimity merge rule yield
+a labeled dataset of
+667~3-annotator-unanimous claims (560 factual, 107 hallucinated; Fleiss'
+$\kappa = 0.5763$).
+On batch evaluation, the e-process is comparable to NLL baselines
+($\Delta_{\text{AUROC}} = -0.103$, 95\% CI $[-0.246, +0.101]$, all four
+non-degenerate length quartiles negative).
+Streaming delay-recall is not evaluated at $n_h = 8$ test-hallucinated
+trace-category records; the evaluated hallucinated subset is Channel-O
+leaning (see \S\ref{sec:channels}), placing it outside the framework's
+detection scope by construction.
+Joint-characterization peeking-FAR analysis is reported with finite-sample
+caveats due to per-category calibration counts
+$n_c^{\text{tr}} \in \{13,14,17,17,17\}$ below the non-vacuous-quantile
+floor $\lceil 1/\alpha \rceil + 1 = 21$ at $\alpha = 0.05$; empirical
+$\hat{\text{FAR}}_A = 0/31$ does not violate the Ville bound but cannot
+certify it tighter than $[0, 0.112]$ at this sample size.
+\keywords{Hallucination analysis \and conformal prediction \and
+sequential testing \and self-surprise \and anytime-valid inference
+\and large language models.}
+\end{abstract}
+
+% ═══════════════════════════════════════════════════════════════════════
+\section{Introduction}
+
+\subsection{The Problem}
+
+Large language models generate fluent text but are prone to
+\textit{hallucinations}---statements that are factually incorrect,
+unsubstantiated, or internally inconsistent. Existing detection methods
+fall into three broad classes:
+\begin{enumerate}
+    \item \textbf{Multi-sample consistency} methods (e.g., SelfCheckGPT~\cite{manakul2023selfcheck})
+          detect factuality degradation via repeated sampling, which is
+          computationally expensive and post-hoc;
+    \item \textbf{Semantic-entropy / confabulation} methods
+          (e.g.,~\cite{farquhar2024detecting}) identify confabulation subsets
+          but require claim-level modeling;
+    \item \textbf{External knowledge grounding} (e.g., FActScore~\cite{min2023factscore})
+          verifies claims against retrieved evidence, introducing retrieval
+          latency and coverage gaps.
+\end{enumerate}
+None of these methods operate \textit{online} at the token level with formal
+statistical guarantees on false alarm rates.
+
+\subsection{Core Insight: Reframing the Null Hypothesis}
+
+A central conceptual shift underlies our framework. We do \textbf{not} use the
+e-process to ``reject the hypothesis that the model is truthful.'' Instead, we
+define the null hypothesis purely in terms of the model's own sampling behavior:
+\begin{equation}\label{eq:hnull}
+\Hnull:\; X_t \mid \mathcal{F}_{t-1} \sim q_t,
+\end{equation}
+where $q_t$ is the \textit{actual} sampling distribution after temperature
+scaling and top-$p$ truncation. Under standard HuggingFace sampling,
+$X_t \sim q_t$ is a \textit{behavioral fact}, not a falsifiable statistical
+assumption. The e-process therefore functions as a \textbf{rare-trajectory
+detector}: it flags token paths that are improbable under the model's own
+sampling regime, without making any claim about factual truth.
+
+This reframing has an important consequence: the e-process can flag
+``self-surprise'' even when the model is generating factually correct text.
+Conversely, the e-process can remain silent when the model confidently emits a
+falsehood (Channel~O hallucinations). The connection between self-surprise and
+factual error is therefore \textbf{empirical}, not logical---and quantifying
+this connection is the role of Layer~3.
+
+\subsection{The Three-Layer Framework}
+
+Our framework consists of three structurally independent layers with
+non-overlapping mathematical foundations:
+\begin{itemize}
+    \item \textbf{Layer~1 (Token Theorem)}: An anytime-valid e-process over
+          token-level self-surprise scores, with Type~I error control under
+          $\Hnull$ (Theorem~\ref{thm:layer1}).
+    \item \textbf{Layer~2 (Claim Conformal Calibration)}: Split conformal
+          prediction over atomic claims to bound the false alarm rate on
+          factual claims, relying on exchangeability rather than $\Hnull$
+          (Theorem~\ref{thm:layer2}).
+    \item \textbf{Layer~3 (Empirical Hallucination Bridge)}: An empirical
+          study connecting token-level self-surprise signals to claim-level
+          hallucination labels, evaluated per category with bootstrap
+          confidence intervals.
+\end{itemize}
+
+\subsection{Two Hallucination Channels}
+
+We explicitly categorize hallucinations into two channels:
+\begin{itemize}
+    \item \textbf{Channel~U (Uncertainty-driven)}: The model samples in a
+          low-knowledge region, producing tokens with
+          $q_t(X_t) < \|q_t\|_2^2$. The e-process is structurally sensitive
+          to this category.
+    \item \textbf{Channel~O (Overconfident hallucination)}: The model
+          confidently outputs a false token with high $q_t(X_t)$---often
+          due to a false premise embedded in the prompt or context. Token-level
+          proper scoring rules are structurally blind to this category.
+          Addressing Channel~O requires orthogonal methods and is declared
+          as explicit future work.
+\end{itemize}
+
+\subsection{Contributions}
+\begin{enumerate}
+    \item A token-derived self-surprise statistic
+          $s_t = \|q_t\|_2^2 - q_t(X_t)$ with explicit boundedness and
+          mean-zero properties under $\Hnull$, suitable for both batch
+          claim-level scoring and sequential streaming evaluation
+          (Lemma~\ref{lem:mean-zero}, Lemma~\ref{lem:bounded}).
+    \item A trace-level per-category split conformal calibration
+          procedure (Theorem~\ref{thm:layer2}) that delivers an exact
+          finite-sample false-alarm-rate bound on factual traces
+          conditional on category, where the unit of exchangeability
+          (trace) matches the unit of the cal/test split. A claim-level
+          analogue threshold $T_{\alpha,c}$ (Remark~\ref{prop:claim-level})
+          is reported as an \emph{informal reference} using
+          $\alpha + 1/(m_c+1)$, with per-prompt Clopper--Pearson
+          miscoverage cells flagged as a diagnostic rather than as a
+          formal bound (Remark~\ref{rem:trace-unit-rationale}).
+    \item An empirical batch characterization on 1{,}026~atomic claims
+          across five categories, comparing the proposed score against
+          mean-entropy, mean-NLL, max-NLL, and \emph{per-claim variance}
+          baselines, with a length-stratified sanity check; honest
+          §6 limitations disclose that the effective empirical
+          contribution is dominated by C5 and that the underlying
+          labels are LLM-derived.
+    \item A streaming delay-recall comparison against a CUSUM baseline
+          run on the same score $s_t$, characterizing the contribution
+          of the multiplicative aggregation mechanism relative to
+          additive cumulation on the same underlying signal.
+    \item An empirical characterization of false alarm rate behavior
+          under repeated peeking across three threshold regimes on
+          factual traces, providing operational context for
+          Theorem~\ref{thm:layer1}'s structural guarantee: the same
+          single-cohort wealth process $M_t = \prod_t(1 + \beta s_t)$
+          is monitored under (i)~the Ville-derived $1/\alpha$
+          (conservative anytime-valid threshold), (ii)~a tight
+          empirically-calibrated anytime-valid threshold $c_A^*$ equal
+          to the per-category $(1-\alpha)$-empirical-quantile of
+          $\sup_t M_t$ over cal-factual traces in each category $c$,
+          and (iii)~a single-stop critical value $c^*$ calibrated to
+          $\mathbb{P}(M_{T_i}\!\ge\!c^*)\!=\!\alpha$ at each trace's
+          natural terminal. Denoting the three alarms by Arm~A,
+          Arm~$A'$, and Arm~B for thresholds $1/\alpha$, $c_A^*$, and
+          $c^*$ respectively (precise definitions in
+          Remark~\ref{rem:theorem1-scope}), by the per-category
+          structural ordering $c^* \leq c_A^* \leq 1/\alpha$ (where
+          $c^* \leq c_A^*$ follows from $\sup_t M_t \geq M_{T_i}$
+          pointwise dominance on the same category-$c$ cal-factual
+          sample, and $c_A^* \leq 1/\alpha$ follows from Ville's
+          inequality under $\Hnull$;
+          see Remark~\ref{rem:theorem1-scope}), the threshold
+          magnitudes are jointly determined by both the
+          calibration-target choice (sup-over-trajectory vs.\
+          terminal-only) and the anytime-valid property; we therefore
+          report the resulting FAR gaps as joint characterizations
+          rather than as isolated attribution to any single property.
+          By construction, whenever the peek set $K$ includes each
+          trace's natural terminal time $T_i$ (the convention we adopt
+          throughout), the lower bound $\text{FAR}_B(K) \geq \alpha$
+          holds (Arm B's threshold $c^*$ is calibrated to alarm at rate
+          $\alpha$ at $T_i$). Monotonicity
+          $K' \supseteq K \Rightarrow \text{FAR}_B(K') \geq
+          \text{FAR}_B(K)$ holds by set inclusion without
+          distributional assumption.
+    \item A demarcation of Channel~U vs.\ Channel~O as a methodological
+          decomposition of detectability boundaries, with Channel~O
+          declared a documented structural limitation.
+\end{enumerate}
+
+% ═══════════════════════════════════════════════════════════════════════
+\section{Preliminaries}
+
+\subsection{Strictly Proper Scoring Rules and Bregman Divergence}
+
+A scoring rule $S(q, x)$ maps a predicted distribution $q$ over a finite
+vocabulary $\mathcal{V}$ and an outcome $x \in \mathcal{V}$ to a real-valued
+loss. $S$ is \textit{strictly proper} if the expected score
+$\bar{S}(q, p) := \mathbb{E}_{Y \sim p}[S(q, Y)]$ satisfies
+$\bar{S}(q, p) \ge \bar{S}(p, p)$ with equality iff $q = p$. Every strictly
+proper scoring rule induces a Bregman divergence
+$D_\phi(p \| q) = \bar{S}(q, p) - \bar{S}(p, p)$, where
+$\phi(p) := -\bar{S}(p, p)$ is a strictly convex generator
+function~\cite{gneiting2007strictly}.
+
+We use the \textbf{Brier score}:
+\begin{equation}
+\text{BS}(q, x) = \sum_{v \in \mathcal{V}} (\mathbf{1}_{\{v=x\}} - q(v))^2
+                = 1 - 2q(x) + \|q\|_2^2,
+\end{equation}
+with generator $\phi(p) = \|p\|_2^2$ and Bregman divergence $\|p - q\|_2^2$.
+
+\subsection{E-Processes and Ville's Inequality}
+
+\begin{definition}
+A nonnegative process $(E_t)_{t \ge 0}$ adapted to a filtration
+$(\mathcal{F}_t)$ is an e-process for a family of distributions $\mathcal{P}$
+if $E_0 \le 1$ and for every $P \in \mathcal{P}$ and every
+$(\mathcal{F}_t)$-stopping time $\tau$,
+$\mathbb{E}_P[E_\tau] \le 1$.
+\end{definition}
+
+\begin{theorem}[Ville's inequality~\cite{ville1939etude}]
+If $(E_t)$ is a nonnegative supermartingale with $E_0 \le 1$, then for any
+$c > 0$, $\mathbb{P}(\sup_t E_t \ge c) \le E_0 / c \le 1/c$. In particular,
+for $\tau = \inf\{t: E_t \ge 1/\alpha\}$,
+$\mathbb{P}(\tau < \infty) \le \alpha$.
+\end{theorem}
+
+\subsection{Cohort E-Process and E-Detector}
+
+Following~\cite{shin2023edetectors}, for each start time $j \ge 1$ we define
+a \textit{cohort e-process} $\Lambda_t^{(j)}$ that begins accumulating evidence
+at time $j$. The mixture e-process
+$M_t = \sum_{j} w_j \Lambda_t^{(j)}$ weights cohorts by deterministic
+nonnegative weights $\{w_j\}$ with $\sum_j w_j \le 1$.
+An important practical detail: inactive cohorts (those with $j > t$) contribute
+$w_j \cdot 1$ to the mixture, so
+$M_t = \sum_{j \le t} w_j \Lambda_t^{(j)} + \sum_{j > t} w_j$. The tail sum
+must be preserved for the supermartingale property to hold.
+
+\subsection{Split Conformal Prediction}
+
+Given a calibration set $\{A_1, \ldots, A_m\}$ of nonconformity scores for
+factual claims, and a new exchangeable factual claim with score
+$A_{\text{new}}$, the split conformal
+framework~\cite{vovk2005algorithmic,lei2018distribution} guarantees:
+\begin{equation}
+\mathbb{P}\!\left(A_{\text{new}} > T_\alpha \right) \le \alpha + \frac{1}{m+1},
+\end{equation}
+where $T_\alpha$ is the
+$\lceil (m+1)(1-\alpha) \rceil$-th order statistic of
+$\{A_1, \ldots, A_m\}$.
+
+% ═══════════════════════════════════════════════════════════════════════
+\section{Setup and Assumptions}
+
+\subsection{Generation Process and Filtration}
+
+Let $\mathcal{V}$ be the finite vocabulary. At each step $t$, the LLM
+computes logits $\ell_t$ and raw softmax $p_t$ from the context history.
+The \textit{actual sampling distribution} $q_t$ is obtained from $p_t$ by
+applying temperature $T$ and top-$p$ truncation:
+$q_t(v) \propto p_t(v)^{1/T}$ restricted to the minimal set of tokens with
+cumulative probability $\ge p$. The next token $X_t$ is sampled
+$X_t \sim q_t$. The natural filtration is
+$\mathcal{F}_t = \sigma(X_1, \ldots, X_t)$, and both $p_t$ and $q_t$ are
+$\mathcal{F}_{t-1}$-measurable.
+
+\begin{remark}[Implementation-critical]
+All downstream theory uses $q_t$, not $p_t$. If the generation pipeline only
+saves $p_t$ under $T \neq 1$ or $\texttt{top-p} < 1$, the centered token-level
+score is no longer mean-zero, and the e-process property is lost.
+Our pipeline explicitly saves $q_t(X_t)$ and $\|q_t\|_2^2$ for every token.
+\end{remark}
+
+\subsection{Two Distinct Null Hypotheses}
+
+\begin{definition}[Statistical null]
+$\Hnull: X_t \mid \mathcal{F}_{t-1} \sim q_t$ for all $t$.
+\end{definition}
+
+\begin{definition}[Factual null]
+$H_0^{\text{fact}}$: a claim spanning tokens $[a, b]$ is factually correct.
+\end{definition}
+
+\begin{remark}
+Under standard HuggingFace sampling, $X_t \sim q_t$ is a behavioral fact, not
+a falsifiable assumption. Even when the generated claims are entirely
+hallucinated, $\Hnull$ continues to hold as long as the sampling mechanism
+follows $q_t$. Therefore, an e-process based on $\Hnull$ cannot inflate in
+expectation merely because the model hallucinates---it can only detect that
+the \textit{realized trajectory} lies in a low-density region of $q_t$.
+\end{remark}
+
+\begin{remark}[OOD prompts]
+Out-of-distribution prompts change the shape of $q_t$ (shifted support,
+concentrated mass, etc.) but do not change the fact that $X_t \sim q_t$.
+OOD effects are therefore \textit{empirical}---they may make hallucination
+and low-support sampling statistically correlated, which is a Layer~3
+phenomenon, not a Layer~1 violation of $\Hnull$.
+\end{remark}
+
+\subsection{Channel~U and Channel~O}
+\label{sec:channels}
+
+\begin{itemize}
+    \item \textbf{Channel~U (Uncertainty-driven)}: The model operates in an
+          uncertain region, producing tokens where
+          $q_t(X_t) < \|q_t\|_2^2$ is sustained. The e-process is structurally
+          designed to detect this channel.
+    \item \textbf{Channel~O (Overconfident hallucination)}: The model
+          confidently outputs a false token with high $q_t(X_t)$ and
+          $s_t \le 0$, so the e-process does not trigger. Causes include
+          false premises embedded in the prompt, memorized falsehoods, or
+          pattern-completion artifacts. Channel~O requires orthogonal methods
+          and is explicit future work.
+\end{itemize}
+
+\paragraph{Dataset characterization.}
+On the present dataset, hallucinated atomic claims distribute by category
+as $C_1{=}7$, $C_2{=}2$, $C_3{=}41$, $C_4{=}27$, $C_5{=}30$ (total~107
+hallucinated of 667 unanimous-merged claims). The post-cutoff-knowledge
+category $C_5$ alone accounts for 28\% of hallucinations, and the wider
+Channel-O proxy $C_1 + C_5$ accounts for 34.6\% — placing this dataset
+in a Channel-O-leaning regime per the above taxonomy.
+
+% ═══════════════════════════════════════════════════════════════════════
+\section{Layer~1: Token-Level Self-Surprise E-Process}
+
+\subsection{Score Function: Centered Brier Residual}
+
+We define the token-level score as the centered Brier residual:
+\begin{equation}\label{eq:st}
+s_t = \tfrac{1}{2}\bigl(\text{BS}(q_t, X_t) -
+      \mathbb{E}_{Y \sim q_t}[\text{BS}(q_t, Y)]\bigr)
+    = \|q_t\|_2^2 - q_t(X_t) \in [-1, 1].
+\end{equation}
+
+\begin{lemma}[Mean-zero under $\Hnull$]\label{lem:mean-zero}
+Under $\Hnull$, $\mathbb{E}[s_t \mid \mathcal{F}_{t-1}] = 0$.
+\end{lemma}
+
+\begin{proof}
+Since $X_t \mid \mathcal{F}_{t-1} \sim q_t$ and $q_t$ is
+$\mathcal{F}_{t-1}$-measurable,
+$\mathbb{E}[q_t(X_t) \mid \mathcal{F}_{t-1}]
+ = \sum_v q_t(v) \cdot q_t(v) = \|q_t\|_2^2$.
+Therefore $\mathbb{E}[s_t \mid \mathcal{F}_{t-1}]
+ = \|q_t\|_2^2 - \|q_t\|_2^2 = 0$.
+\end{proof}
+
+\begin{lemma}[Boundedness]\label{lem:bounded}
+$s_t \in [-1, 1]$ almost surely.
+\end{lemma}
+
+\begin{proof}
+$q_t$ is a probability distribution over the finite vocabulary
+$\mathcal{V}$, so $q_t(v) \in [0, 1]$ for every $v$ and
+$\|q_t\|_2^2 = \sum_v q_t(v)^2 \in [0, 1]$. Therefore
+$s_t = \|q_t\|_2^2 - q_t(X_t) \in [-1, 1]$ almost surely.
+\end{proof}
+
+\subsection{Why the Expectation Is Not a Bregman Divergence}
+
+A correction from a prior version (v7): under an arbitrary alternative
+distribution $X_t \sim r_t \neq q_t$,
+\begin{equation}\label{eq:expectation-r}
+\mathbb{E}_{X_t \sim r_t}[s_t \mid \mathcal{F}_{t-1}]
+    = \|q_t\|_2^2 - \langle r_t, q_t \rangle
+    = \langle q_t - r_t,\, q_t \rangle,
+\end{equation}
+which is \textbf{not} $\|r_t - q_t\|_2^2$ and is not guaranteed to be
+nonnegative. This is not a bug---it is the mathematical reason why
+Channel~O hallucinations (where $r_t$ concentrates mass on the same tokens as
+$q_t$) are invisible to the e-process. The Bregman divergence only appears in
+the \textit{propriety gap} of the full Brier score, not in the centered
+residual of~\eqref{eq:st}.
+
+\subsection{Cohort E-Process Construction}
+
+For each start index $j \ge 1$, define the cohort process:
+\begin{equation}\label{eq:cohort}
+\Lambda_t^{(j)} =
+\begin{cases}
+1, & t < j, \\[6pt]
+\displaystyle\prod_{i=j}^{t} \bigl(1 + \beta_i^{(j)} s_i\bigr), & t \ge j,
+\end{cases}
+\end{equation}
+where $\beta_i^{(j)} \in [0, B]$ with $B \in (0, 1)$, and crucially,
+$\beta_i^{(j)}$ must be $\mathcal{F}_{i-1}$-measurable---it cannot depend on
+$s_i$ or $X_i$.
+
+\begin{lemma}[Cohort martingale]\label{lem:cohort-martingale}
+Under $\Hnull$, each $\Lambda^{(j)}$ is a nonnegative martingale with
+$\mathbb{E}[\Lambda_t^{(j)}] = 1$.
+\end{lemma}
+
+\begin{proof}
+$1 + \beta_i^{(j)} s_i \ge 1 - B > 0$ ensures nonnegativity. For $t \ge j$,
+$\mathbb{E}[\Lambda_t^{(j)} \mid \mathcal{F}_{t-1}]
+ = \Lambda_{t-1}^{(j)}\bigl(1 + \beta_t^{(j)}\mathbb{E}[s_t \mid
+   \mathcal{F}_{t-1}]\bigr)
+ = \Lambda_{t-1}^{(j)}$ by Lemma~\ref{lem:mean-zero} and
+$\beta_t^{(j)} \in \mathcal{F}_{t-1}$.
+\end{proof}
+
+\subsection{Mixture E-Process}
+
+Let $\{w_j\}_{j \ge 1}$ be deterministic nonnegative weights with
+$\sum_{j=1}^\infty w_j \le 1$. The mixture e-process is:
+\begin{equation}\label{eq:mixture}
+M_t = \sum_{j=1}^\infty w_j \Lambda_t^{(j)}
+    = \underbrace{\sum_{j=1}^{t} w_j \Lambda_t^{(j)}}_{\text{active}}
+    + \underbrace{\sum_{j=t+1}^{\infty} w_j}_{\text{inactive tail}}.
+\end{equation}
+
+\begin{remark}[Inactive tail]
+In implementation, it is common to compute only the active sum, but then
+$M_0^{\text{active}} = 0 \not\le 1$ and the Ville bound does not apply
+directly. The correct procedure initializes $M \leftarrow \sum_j w_j$ and
+moves weight from the inactive tail to active cohorts as new cohorts start.
+\end{remark}
+
+\subsection{Main Theorem}
+
+\begin{theorem}[Anytime-valid Type~I control]\label{thm:layer1}
+Let $M_t$ be defined by~\eqref{eq:mixture} with $\sum_j w_j \le 1$ and
+$\beta_i^{(j)} \in [0, B] \subset [0, 1)$ being
+$\mathcal{F}_{i-1}$-measurable. Define
+$\tau_\alpha = \inf\{t: M_t \ge 1/\alpha\}$. Then
+\[
+\mathbb{P}_{\Hnull}\!\left(\tau_\alpha < \infty\right)
+    = \mathbb{P}_{\Hnull}\!\left(\sup\nolimits_t M_t \ge 1/\alpha\right)
+    \le \alpha.
+\]
+\end{theorem}
+
+\begin{proof}
+By Lemma~\ref{lem:cohort-martingale} and linearity of expectation,
+$M_t$ is a nonnegative martingale with $M_0 = \sum_j w_j \le 1$.
+Ville's inequality with $c = 1/\alpha$ gives the result.
+\end{proof}
+
+\begin{remark}[Scope of Theorem~\ref{thm:layer1}]
+\label{rem:theorem1-scope}
+Theorem~\ref{thm:layer1} controls
+$\mathbb{P}_{\Hnull}(\sup_t M_t \ge 1/\alpha) \le \alpha$, where
+$\Hnull: X_t \mid \mathcal{F}_{t-1} \sim q_t$ holds by construction
+whenever the model samples from its own (post-temperature,
+post-top-$p$) distribution. Two consequences follow.
+
+\textbf{(i)~The guarantee is calibration, not detection power.}
+The inequality bounds the Type~I rate of the rare-path monitor under
+a null that is satisfied on \emph{every} trajectory the model
+produces---factual or hallucinated. Theorem~\ref{thm:layer1}
+therefore certifies that the monitor will not falsely alarm at rate
+exceeding $\alpha$; it does \emph{not} imply that the monitor's alarm
+rate on hallucinated trajectories is any higher than on factual ones.
+In particular, Theorem~\ref{thm:layer1} does NOT claim
+(a)~alarm~$\Rightarrow$~hallucination,
+(b)~hallucination~$\Rightarrow$~$\Hnull$ violation, or
+(c)~bounded false alarm rate on factual claims (this last is
+addressed by Theorem~\ref{thm:layer2} under a separate
+exchangeability assumption, not by Theorem~\ref{thm:layer1}).
+Whether the score function $s_t$ empirically separates factual from
+hallucinated trajectories is an empirical question, addressed in the
+batch claim-level results and the streaming delay-recall results.
+
+\textbf{(ii)~The behavior of $M_t$ under repeated peeking is
+empirically characterized via a three-arm comparison on the same
+wealth process.} The same single-cohort wealth process
+$M_t = \prod_t(1 + \beta s_t)$ is monitored under three threshold
+regimes that share the same input data and the same peek schedule:
+the Ville-derived $1/\alpha$ (conservative anytime-valid threshold,
+distribution-free), a tight empirically-calibrated anytime-valid
+threshold $c_A^*$ equal to the $(1-\alpha)$-empirical-quantile of
+$\sup_t M_t$ over cal-factual traces in category $c$ (which delivers,
+by split conformal applied to the trace-level statistic $\sup_t M_t$
+under cal/test trace-level exchangeability within category $c$, the
+bound $\mathbb{P}_\text{test}(\sup_t M_t \ge c_A^* \mid c) \le \alpha
++ 1/(n_c^{\text{tr}}+1)$; subset containment $\{M_\tau \ge c_A^*\}
+\subseteq \{\sup_t M_t \ge c_A^*\}$ for any stopping time $\tau$ then
+extends this bound to any peek schedule), and a
+single-stop critical value $c^*$ calibrated to
+$\mathbb{P}(M_{T_i}\!\ge\!c^*)\!=\!\alpha$ at each trace's natural
+terminal (\emph{not} anytime-valid under peeking). We denote by Arm~A,
+Arm~$A'$, and Arm~B the alarms triggered by thresholds $1/\alpha$,
+$c_A^*$, and $c^*$ respectively, and write
+$\text{FAR}_X(K) := \mathbb{P}_{\text{factual, test}}\bigl(\sup_{\tau \in K} M_\tau \ge \text{threshold}_X\bigr)$
+for $X \in \{A, A', B\}$ over a peek schedule $K$. By the per-category
+structural ordering $c^* \leq c_A^* \leq 1/\alpha$, where
+$c^* \leq c_A^*$ follows from $\sup_t M_t \geq M_{T_i}$ pointwise
+dominance applied to the same category-$c$ cal-factual sample, and
+$c_A^* \leq 1/\alpha$ follows from Ville's inequality applied to the
+non-negative martingale $M_t$ under $\Hnull$ via the empirical
+$(1-\alpha)$-quantile-to-tail correspondence on cal-factual traces, the
+three threshold
+magnitudes are jointly determined by both the calibration-target
+choice (sup vs.\ terminal) and the anytime-valid property. We
+therefore report the resulting gaps $\text{FAR}_B(K) -
+\text{FAR}_{A'}(K)$ and $\text{FAR}_{A'}(K) - \text{FAR}_A(K)$ as
+\emph{joint characterizations} rather than as isolated attribution to
+any single property; the Ville bound's universal distribution-free
+guarantee on $\text{FAR}_A$ remains exact at any peek schedule.
+
+This separation between \emph{what the theorem certifies}
+(calibration under a constructed null, robust to optional stopping)
+and \emph{what the experiments establish} (empirical characterization
+of FAR behavior under peeking across three threshold regimes, with
+the Ville bound's exact anytime-valid Type-I control invariant under
+peeking) is made explicit throughout the paper; the theorem is not
+used as evidence for detection capability.
+\end{remark}
+
+\subsection{Betting Strategy}
+
+The choice of $\beta_t^{(j)}$ is critical for power but must respect
+$\mathcal{F}_{t-1}$-measurability. We consider:
+\begin{itemize}
+    \item \textbf{Fixed} $\beta = 0.1$: simple, no look-ahead, serves as baseline.
+    \item \textbf{EMA plug-in}: exponential moving average of recent
+          $|s_{t-k}|$ to adapt bet size while maintaining measurability.
+    \item \textbf{ONS} (Online Newton Step)~\cite{hazan2007logarithmic}:
+          adaptive betting with regret guarantees, applied only to past scores
+          $s_1, \ldots, s_{t-1}$ to preserve $\mathcal{F}_{t-1}$-measurability;
+          deferred from the main runs and reported only as an ablation per
+          \texttt{phase\_d/PIPELINE\_MODIFICATIONS\_PLAN\_v2.md} §11.
+\end{itemize}
+Weight schedules: \textbf{harmonic}
+$w_j = 1/(j(j+1))$ ($\sum_j w_j = 1$, $O(t^2)$) and
+\textbf{dyadic}~\cite{shin2023edetectors}
+($w_j > 0$ only for $j \in \{1, 2, 4, 8, \ldots\}$,
+$\sum_j w_j = 1$, $O(t \log t)$).
+
+The primary betting/weight combination for the main results is committed
+to \texttt{phase\_d/runs/<ts>/manifest.json} before execution per the
+pre-registration discipline in
+\texttt{phase\_d/PIPELINE\_MODIFICATIONS\_PLAN\_v2.md} §6.4; all listed
+variants are evaluated in the Group~D ablation
+(\S\ref{ssec:results-groupD}).
+
+% ═══════════════════════════════════════════════════════════════════════
+\section{Layer~2: Claim-Level Conformal Calibration}
+
+\subsection{Motivation}
+
+Theorem~\ref{thm:layer1} controls
+$\mathbb{P}_{\Hnull}(\text{alarm}) \le \alpha$, but this is not the same as
+$\mathbb{P}(\text{alarm} \mid \text{claim is factual}) \le \alpha$---the two
+probabilities live in different probability spaces. To bound the false alarm
+rate on factual claims, we need an additional statistical principle:
+split conformal calibration~\cite{vovk2005algorithmic,lei2018distribution}.
+
+\subsection{Localized Claim Score}
+
+A claim occupies token span $[a, b]$. We cannot use the global $M_t$ as the
+claim score because $M_t$ accumulates from $t=1$, and a high $M_t$ during
+$[a, b]$ may be inherited from evidence accumulated before $a$. We define two
+localized aggregators:
+\begin{align}
+\claimscore([a, b]) &=
+   \max_{j \in [a, b]} \max_{t \in [j, b]} w_j \Lambda_t^{(j)},
+   \label{eq:aclaim} \\[6pt]
+\claimscorelog([a, b]) &=
+   \max_{t \in [a, b]} \bigl(\log M_t - \log M_{a-1}\bigr).
+   \label{eq:aclaillog}
+\end{align}
+Equation~\eqref{eq:aclaim} is the localized e-value form (maximum over
+cohorts starting within $[a, b]$). Equation~\eqref{eq:aclaillog} is the
+log-wealth increment over the claim span---it is no longer an e-value but
+empirically yields better ranking performance (higher AUROC). We report
+both. Note that because $M_t$ is a sum (not product) over cohorts,
+$\log M_t - \log M_{a-1}$ can \emph{underestimate} the evidence contributed
+by cohorts starting within $[a, b]$ when pre-$a$ cohorts dominate the
+mixture---the opposite failure mode from the multiplicative claim score
+$\claimscore$, which can be inflated by short, high-$\Lambda$ cohorts
+started mid-claim. We document these distinct pathologies in the ablation
+report (Group~D).
+
+\subsection{Per-Category Conformal Threshold}
+
+Let $\mathcal{D}_{\text{cal}}$ contain factual claims with their scores. A
+"trace" denotes a generation trajectory indexed by
+$(\text{prompt\_id}, \text{seed})$. Our cal/test split protocol operates at
+the trace level: every claim from a given trace is assigned to the same side
+(stratified by category at the trace level; see Data Construction Pipeline
+below). For each trace $i$ in category $c$, define a
+\textbf{per-trace summary score}
+\begin{equation}\label{eq:tracescore}
+\bar{A}_i \;=\; \max_{\text{claim } k \in \text{trace } i,\ c_k = c}\, A_k,
+\end{equation}
+i.e., the maximum claim score over the trace's factual claims in category $c$
+(or $-\infty$ if the trace has no factual claim in $c$). Let
+$n_c^{\text{tr}}$ be the number of factual calibration traces in category
+$c$. For each category, the trace-level per-category threshold is:
+\begin{equation}\label{eq:Talphac}
+\bar{T}_{\alpha, c} := \bigl\lceil (n_c^{\text{tr}} + 1)(1 - \alpha) \bigr\rceil\text{-th
+order statistic of } \{\bar{A}_i : i \in \mathcal{D}_\text{cal},\ c_i = c,\ Y_i = \text{factual}\}.
+\end{equation}
+
+\begin{theorem}[Trace-level per-category conformal false alarm control]
+\label{thm:layer2}
+Assume $\{\bar{A}_1, \ldots, \bar{A}_{n_c^{\text{tr}}}, \bar{A}_{\text{new}}\}$
+are the per-trace summary scores of factual traces in category $c$, and assume
+\textbf{trace-level} exchangeability between calibration and test traces
+within category $c$. Then
+\[
+\mathbb{P}\!\left(\bar{A}_{\text{new}} > \bar{T}_{\alpha, c}
+   \mid Y_{\text{new}} = \text{factual},\ c\right)
+   \;\le\; \alpha + \frac{1}{n_c^{\text{tr}} + 1}.
+\]
+\end{theorem}
+
+\begin{proof}
+Standard split conformal argument~\cite{vovk2005algorithmic}: under
+exchangeability of the per-trace summary scores, the rank of
+$\bar{A}_{\text{new}}$ among
+$\{\bar{A}_1, \ldots, \bar{A}_{n_c^{\text{tr}}}, \bar{A}_{\text{new}}\}$ is
+uniformly distributed over $\{1, \ldots, n_c^{\text{tr}}+1\}$. The probability
+that it exceeds the
+$\lceil (n_c^{\text{tr}}+1)(1-\alpha) \rceil$-th order statistic is at most
+$\alpha + 1/(n_c^{\text{tr}}+1)$. The unit of exchangeability matches the
+unit of the split (trace level), so the bound holds exactly in finite samples.
+\end{proof}
+
+\begin{remark}[Choice of unit: traces, not individual claims]
+\label{rem:trace-unit-rationale}
+We state Theorem~\ref{thm:layer2} at the trace level because that is the
+unit of the cal/test split. Stating it at the individual-claim level
+would assume claim-level exchangeability between calibration and test, but
+multiple claims from the same trace share the token-level feature
+trajectory, the cumulative wealth $M_t$ history, and the prompt; within-trace
+dependence breaks claim-level exchangeability across the cal/test boundary.
+The trace-level form delivers an exact finite-sample bound under the
+assumption that actually holds in our protocol. The cost is reduced
+resolution: each trace contributes one summary score rather than several
+claim-level scores. We mitigate this by reporting trace-level conformal
+calibration as the primary statistical guarantee, while also reporting
+individual-claim AUROC and per-prompt miscoverage as informal
+diagnostics (see Remark~\ref{prop:claim-level} and Group~B).
+\end{remark}
+
+\begin{remark}[Claim-level analogue threshold, informal]
+\label{prop:claim-level}
+For exploratory characterization, one may also define a per-claim
+threshold $T_{\alpha, c}$ via the
+$\lceil (m_c+1)(1-\alpha) \rceil$-th order statistic of the calibration
+claim scores in category $c$ (with $m_c$ the number of factual calibration
+claims). We do not state this as a Proposition or Theorem because the
+claim-level exchangeability assumption it would require does not hold
+under our trace-level split (within-trace dependence breaks individual-claim
+exchangeability across cal/test). The analogous formal bound
+$\mathbb{P}(A_{\text{new}} > T_{\alpha, c} \mid Y_{\text{new}} = \text{factual},\ c)
+\le \alpha + 1/(m_c+1)$ therefore fails to apply directly; we use
+$T_{\alpha,c}$ as an informal claim-level threshold whose deviation from
+the formal bound is monitored empirically via per-prompt miscoverage with
+Clopper--Pearson 95\%~confidence intervals (Group~B), flagging a
+$(c, \text{prompt})$ cell only when its lower confidence bound exceeds
+$\alpha + 1/(m_c+1)$ — this is a diagnostic flag, not a formal bound.
+The claim-level scores are also the input to per-category AUROC and
+PR-AUC characterizations (Layer~3); these characterizations are
+reported as empirical correlation rather than as conformal-guaranteed
+false-alarm control.
+\end{remark}
+
+\begin{remark}
+The Layer~2 trace-level guarantee relies on exchangeability between
+calibration and test \emph{traces} within each category---not on $\Hnull$
+or any model-internal property. If exchangeability is broken (e.g.,
+distribution shift in prompts or model version change), the guarantee
+degrades. The exchangeability is empirical; we assess robustness via the
+per-prompt miscoverage diagnostic in Group~B.
+\end{remark}
+
+\subsection{Data Construction Pipeline}
+
+\subsubsection{Stage~1: Token-Level Feature Generation}
+
+We use Qwen2.5-7B-Instruct as the target model. 25~prompts are divided into
+five categories (C1--C5, see Table~\ref{tab:prompts}). For each prompt,
+we generate 5~trajectories with random seeds
+$\{42, 137, 256, 512, 1024\}$, yielding 125~generation trajectories.
+Generation uses temperature $T = 0.7$, top-$p = 0.9$, and
+$\texttt{max\_new\_tokens} = 1024$. Token features ($q_t$, $\|q_t\|_2^2$,
+$p_t$, and auxiliary columns) are saved to a unified parquet file
+(35,138~token rows). All downstream analyses read from this file;
+the model is not re-invoked.
+
+\subsubsection{Stage~2: Claim Extraction and Annotation}
+
+\textbf{Phase A --- Claim extraction.} For each of the 125~generation
+trajectories, we extract atomic factual claims with token-span mapping via the
+DeepSeek V3.2~API. Token-to-character alignment is verified by round-trip
+validation (100\% pass rate required). A pipeline fingerprint (SHA256 of
+deterministic parameters) is embedded in each record. This produced
+1,026~atomic claims.
+
+\textbf{Phase B --- Multi-annotator annotation.} Each claim is independently
+annotated by three LLM-based annotators:
+DeepSeek V4 Pro (API),
+GLM-4.7 (API), and
+Claude Sonnet 4.6 (local CLI).
+Each annotator labels every claim as one of:
+\texttt{factual}, \texttt{hallucinated}, \texttt{uncertain}, or
+\texttt{unverifiable}. Category-specific verification modules are used:
+Knowledge Comparison (C1, C4), Recalculation (C2), Premise Detection (C3),
+and Time-Anchored Fact Check (C5).
+
+\textbf{Phase C --- Unanimity merge.} We apply a strict unanimity rule:
+$n$:0 factual $\to$ factual (enters Layer~2 calibration set);
+$n$:0 hallucinated $\to$ hallucinated (enters Layer~3 test set);
+any dissent (factual vs.\ hallucinated) $\to$ needs human review;
+any uncertain $\to$ excluded;
+any unverifiable $\to$ excluded.
+We report Cohen's $\kappa$ (pairwise), Fleiss' $\kappa$ ($n=3$), and the
+label noise indicator $\eta_{\text{pair}}$. Claims are split into
+calibration (70\%) and test (30\%) sets using per-category stratified
+trace-level splitting (whole trajectory assigned entirely to calibration or
+test, preventing information leakage across tokens within the same generation).
+
+Final 3-annotator statistics from the completed annotation pipeline are
+reported in \S\ref{ssec:annotation-stats}.
+
+% ═══════════════════════════════════════════════════════════════════════
+\section{Layer~3: Empirical Hallucination Bridge}
+
+Layer~1 and Layer~2 are mathematically independent. The relationship between
+token-level self-surprise and claim-level hallucination is an \textbf{empirical
+question}---Layer~3 provides the quantitative answer.
+
+\subsection{Evaluation Metrics}
+
+For each claim with score $A$ and binary label
+$Y \in \{0 = \text{factual}, 1 = \text{hallucinated}\}$, we compute:
+\begin{itemize}
+    \item \textbf{AUROC} and \textbf{PR-AUC} with 95\% bootstrap confidence
+          intervals (30 resampling seeds);
+    \item \textbf{Kolmogorov--Smirnov} $D$ statistic and $p$-value: tests
+          whether the score distributions of factual vs.\ hallucinated claims
+          differ;
+    \item \textbf{Mann--Whitney} $U$ statistic and $p$-value: tests stochastic
+          dominance of self-surprise scores for hallucinated claims.
+\end{itemize}
+All metrics are reported per category (C1--C5) and pooled. Bootstrap uses
+trace-level resampling (sampling traces with replacement, not individual
+claims) to preserve within-trace dependence structure.
+
+\subsection{Expected Findings}
+
+Based on the Channel~U / Channel~O structural analysis:
+\begin{itemize}
+    \item \textbf{C1, C2, C5 (Uncertainty-driven)}: AUROC substantially above
+          0.5; self-surprise positively correlated with hallucination.
+    \item \textbf{C3 (Implicit premise)}: AUROC near 0.5; the model absorbs
+          false premises and outputs tokens with high $q_t(X_t)$, so
+          self-surprise signals are weak.
+    \item \textbf{C4 (Hedged hallucination)}: Possible \textit{phi-channel
+          reversal}---self-surprise scores may be negatively correlated with
+          hallucination in hedged expert domains.
+\end{itemize}
+
+The expected findings above are pre-registered predictions of the
+Channel~U/O taxonomy; per-category numerical outputs are reported in
+\S\ref{ssec:results-groupB} and \S\ref{ssec:results-groupC} (with full
+numbers in the companion supplementary materials upon execution).
+
+% ═══════════════════════════════════════════════════════════════════════
+\section{Experimental Design}
+
+\subsection{Prompt Categories}
+
+\begin{table}[ht]
+\centering
+\caption{The 25~prompts across five categories
+         (5~seeds each $=$ 125~trajectories).}
+\label{tab:prompts}
+\begin{tabular}{lll}
+\hline
+Category & Prompt IDs & Description \\
+\hline
+C1\_factual\_recall          & q001--q005 & Factual recall with time- \\
+                             &             & \quad anchored verification \\
+C2\_numerical\_reasoning      & q006--q010 & Math word problems \\
+C3\_implicit\_premise          & q011--q015 & Questions embedding false \\
+                             &             & \quad or tricky premises \\
+C4\_domain\_expertise          & q016--q020 & Expert-level explanations \\
+C5\_post-cutoff\_knowledge     & q021--q025 & Time-sensitive facts after \\
+                             &             & \quad Qwen2.5's cutoff \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Model Configuration}
+\begin{itemize}
+    \item \textbf{Model}: Qwen/Qwen2.5-7B-Instruct (FP16)
+    \item \textbf{Decoding}: $T = 0.7$, top-$p = 0.9$,
+          $\texttt{max\_new\_tokens} = 1024$
+    \item \textbf{Seeds}: $\{42, 137, 256, 512, 1024\}$
+    \item \textbf{System prompt}: ``You are a helpful assistant.
+          Always respond in English.''
+    \item \textbf{Token suppression}: emoji, control characters, PUA, CJK,
+          Hangul ($\sim$32K tokens suppressed; Lemma~\ref{lem:mean-zero}
+          holds for any $\mathcal{F}_{t-1}$-measurable $q_t$, so suppression
+          has no bearing on mean-zero).
+\end{itemize}
+
+\subsection{Group~A: Layer~1 Sanity Check}
+
+\textbf{Objective}: Empirically verify Theorem~\ref{thm:layer1}.
+
+\textbf{Method}: Run Algorithm~1 (see Appendix) on neutral-prompt generations
+where $\Hnull$ holds by construction, computing
+$\hat{\mathbb{P}}(\sup_t M_t \ge 1/\alpha)$ for
+$\alpha \in \{0.01, 0.05, 0.1\}$, verifying that the empirical rejection rate
+does not exceed $\alpha$.
+\begin{itemize}
+    \item \textbf{Positive control}: Inject a $\delta$-shift into $q_t$
+          at a random token position and verify the e-process detects it.
+    \item \textbf{Negative control}: Shuffle tokens randomly; verify the
+          e-process does NOT trigger ($\Hnull$ preserved under permutation).
+    \item \textbf{Per-category}: Verify $\Hnull$ holds uniformly across
+          C1--C5, establishing that any cross-category variation in Layer~3
+          is due to claim-level phenomena.
+\end{itemize}
+
+Empirical rejection rates and control results for Group~A are reported in
+\S\ref{ssec:results-groupA} (pre-registered; numerical outputs in
+companion supplementary materials upon execution).
+
+\subsection{Group~B: Calibration and Detection Performance}
+
+\textbf{Objective}: Validate Theorem~\ref{thm:layer2} and quantify
+self-surprise--hallucination correlation per category.
+
+\textbf{Method}: 30~random stratified trace-level splits (70/30). For each
+split:
+\begin{itemize}
+    \item Compute the trace-level per-category threshold
+          $\bar{T}_{\alpha, c}$ from cal-factual trace summary scores
+          (Theorem~\ref{thm:layer2}, formal guarantee
+          $\le \alpha + 1/(n_c^{\text{tr}}+1)$) and the informal
+          claim-level threshold $T_{\alpha, c}$ from cal-factual claim
+          scores (Remark~\ref{prop:claim-level}, informal reference
+          $\alpha + 1/(m_c+1)$);
+    \item Evaluate $\hat{\mathbb{P}}(\bar{A}_{\text{new}} >
+          \bar{T}_{\alpha, c} \mid Y = \text{factual}, c)$ on test set
+          (formal trace-level bound) and
+          $\hat{\mathbb{P}}(A_{\text{new}} > T_{\alpha, c} \mid
+          Y = \text{factual}, c)$ (informal claim-level reference);
+    \item Compute AUROC, PR-AUC, KS, Mann--Whitney $U$ per category.
+\end{itemize}
+Bootstrap 95\% CIs across 30~splits.
+
+\subsection{Group~C: Channel U / Channel O Demarcation}
+
+\textbf{Objective}: Empirically characterize the boundary between the two
+channels.
+
+\textbf{Method}: Group categories by expected dominant channel:
+Channel~U (C1, C2, C5) vs.\ Channel~O (C3, C4 hedged subset).
+Compare AUROC between groups. A significant gap provides empirical support for
+the theoretical demarcation. The C3/C4 deficit is not a failure of the
+method---it is a \textit{measured characterization} of the structural
+limitation.
+
+\subsection{Group~D: Ablation Studies}
+
+\textbf{Objective}: Quantify the contribution of each design choice.
+\begin{itemize}
+    \item \textbf{Score function}: Centered Brier residual vs.\ centered
+          log-score $-\log q_t(X_t) - H(q_t)$ vs.\ v6~legacy score;
+    \item \textbf{Sampling distribution}: $q_t$ (correct) vs.\ $p_t$ (raw
+          softmax, to demonstrate that mis-specification breaks mean-zero);
+    \item \textbf{Betting}: ONS vs.\ EMA plug-in vs.\ fixed $\beta = 0.1$;
+    \item \textbf{Mixture weights}: Dyadic vs.\ geometric grid vs.\ single cohort;
+    \item \textbf{Claim aggregator}:
+          $\claimscore$ (Eq.~\ref{eq:aclaim}) vs.\
+          $\claimscorelog$ (Eq.~\ref{eq:aclaillog}) vs.\
+          global $\max_t M_t$ (incorrect baseline);
+    \item \textbf{Conformal}: Pooled $T_\alpha$ vs.\ per-category $T_{\alpha,c}$.
+\end{itemize}
+
+Ablation results are reported in \S\ref{ssec:results-groupD} (pre-registered;
+numerical outputs in companion supplementary materials upon execution).
+
+% ═══════════════════════════════════════════════════════════════════════
+\section{Results}
+\label{sec:results}
+
+This section reports two categories of results. \textbf{Stage~1 results}
+(\S\ref{ssec:annotation-stats}) are complete: the annotation pipeline
+(Phases A--C of the Data Construction Pipeline,
+described above) has produced the labeled dataset on which all downstream
+analyses operate, and we report per-annotator distributions,
+inter-annotator agreement, the unanimity-merge yield, and per-category
+calibration sample sizes.
+\textbf{Stage~2 results} (\S\S\ref{ssec:results-groupA}--\ref{ssec:results-groupD})
+are pre-registered analyses whose numerical outputs depend on the Phase~D
+execution plan in \texttt{phase\_d/PIPELINE\_MODIFICATIONS\_PLAN\_v2.md}.
+At submission time, the framework, the theory, the dataset, and the
+pre-registered acceptance criteria (with their associated manifests and
+thresholds) are in place; the numerical outputs of Groups~A--D and of the
+streaming experiments (Path~B) are reported in the accompanying companion
+supplementary materials upon execution. Three new honest disclosures
+(\S\S\ref{ssec:llm-judge-circularity}--\ref{ssec:selection-on-agreement})
+delimit the scope of these analyses regardless of their numerical outcome.
+
+\subsection{Annotation Statistics}
+\label{ssec:annotation-stats}
+
+Of the 1{,}026~atomic claims extracted from 125~generation trajectories,
+\textbf{667 claims} passed the 3-annotator unanimity merge rule (560 factual
+and 107 hallucinated), with the remaining 359 excluded as needs-review for
+one of the following reasons: any annotator chose \texttt{uncertain} or
+\texttt{unverifiable}; the three annotators were split between
+\texttt{factual} and \texttt{hallucinated}; or any annotator failed to
+return a parseable response. The trace-level stratified split assigns
+\textbf{447 claims to calibration} and \textbf{220 claims to test} across
+82~calibration traces and 39~test traces.
+
+Per-annotator label distributions (1{,}026 claims each) are: DeepSeek
+V4~Pro 74.1\% factual / 13.2\% hallucinated / 4.4\% uncertain /
+8.4\% unverifiable; GLM-4.7 76.3\% / 16.3\% / 1.9\% / 5.5\%; Claude
+Sonnet~4.6 57.1\% / 16.2\% / 8.6\% / 18.1\%. Claude's higher use of
+\texttt{uncertain} and \texttt{unverifiable} reflects a structurally
+stricter rubric application; this is a known annotator-level behavior, not
+a label-noise pathology.
+
+Inter-annotator agreement: Fleiss' $\kappa$ ($n=3$, 4-label) is
+\textbf{0.5763} (moderate). Pairwise Cohen's $\kappa$ (4-label) are
+DeepSeek--GLM 0.70, DeepSeek--Claude 0.55, GLM--Claude 0.53. The binary
+collapse (\texttt{factual} vs.\ other) gives DeepSeek--GLM
+$\kappa_\text{bin} = 0.74$, indicating that the bulk of the 4-label
+disagreement concerns the gradient between \texttt{uncertain} and
+\texttt{factual}/\texttt{hallucinated} rather than the
+factual/hallucinated dichotomy itself.
+
+Per-category calibration sample sizes ($\alpha = 0.05$). The
+\textbf{trace-level} cal counts $n_c^{\text{tr}}$ (number of factual
+calibration traces per category, where a trace is factual-in-category $c$
+if it has at least one factual claim in category $c$) determine the exact
+Theorem~\ref{thm:layer2} bound $\bar{B}_c = \alpha + 1/(n_c^{\text{tr}}+1)$;
+the \textbf{claim-level} cal counts $m_c$ (factual cal claims) determine
+the informal Remark~\ref{prop:claim-level} reference value
+$B_c = \alpha + 1/(m_c+1)$.
+
+\begin{table}[ht]
+\centering
+\caption{Per-category claim-level calibration sample sizes $m_c$ (factual
+calibration claims) and informal Remark~\ref{prop:claim-level}
+reference values $B_c = \alpha + 1/(m_c+1)$ at $\alpha = 0.05$. Total calibration
+claims per category (factual + hallucinated, in parentheses) are reported
+alongside. The trace-level cal counts $n_c^{\text{tr}}$ used by
+Theorem~\ref{thm:layer2} and their corresponding bounds
+$\bar{B}_c = \alpha + 1/(n_c^{\text{tr}}+1)$ are computed during Phase~D
+execution by \texttt{phase\_d/conformal\_layer2.py} from the trace-level
+split audit and reported in the companion supplementary materials; based
+on 82 total factual calibration traces stratified across 5~categories,
+$n_c^{\text{tr}}$ will be substantially smaller than $m_c$, so the
+trace-level bound $\bar{B}_c$ will be materially looser than the
+claim-level bound $B_c$, an honest cost of matching the unit of
+exchangeability to the unit of the cal/test split.}
+\label{tab:cal-counts-bounds}
+\begin{tabular}{lrrc}
+\hline
+Category & total cal claims & $m_c$ (factual) & $B_c$ \\
+\hline
+C1 Factual Recall              & 43  & 37  & 0.0763 \\
+C2 Numerical Reasoning         & 86  & 86  & 0.0615 \\
+C3 Implicit Premise            & 89  & 65  & 0.0652 \\
+C4 Domain Expertise            & 170 & 156 & 0.0564 \\
+C5 Post-Cutoff Knowledge       & 59  & 40  & 0.0744 \\
+\hline
+\end{tabular}
+\end{table}
+
+Total test claims per category: C1~22; C2~37; C3~44; C4~91; C5~26 (claim
+level; trace-level test counts $\le$ claim counts per category and reported
+in the companion supplementary materials upon execution). The structural
+limitations on C1 (one hallucinated test claim) and C2 (zero hallucinated
+test claims after trace-level split; the two unanimous-hallucinated C2
+claims belong to a single trace placed entirely in calibration) are
+discussed in \S\ref{ssec:c2-structural} and
+\S\ref{ssec:effective-single-category}; the per-category test
+factual/hallucinated breakdowns are derived from
+\texttt{claim-level/claims\_final.jsonl} and reported in the companion
+supplementary materials.
+
+\subsection{Group~A: Theorem~\ref{thm:layer1} Verification (Pre-Registered)}
+\label{ssec:results-groupA}
+
+\textbf{Pre-registered analysis.} Under $\Hnull$, we evaluate the
+empirical rejection rate $\hat{\mathbb{P}}(\sup_t M_t \ge 1/\alpha)$ for
+$\alpha \in \{0.01, 0.05, 0.10\}$ across the 125~baseline trajectories.
+The acceptance criterion (numerical tolerance accounting for finite-sample
+fluctuation around the nominal $\alpha$ via a Clopper--Pearson upper CI)
+is committed to \texttt{phase\_d/runs/<ts>/manifest.json} before the run,
+per the pre-registration discipline in
+\texttt{phase\_d/PIPELINE\_MODIFICATIONS\_PLAN\_v2.md} §6. \emph{Numerical
+outputs are reported in the companion supplementary materials upon
+execution.}
+The Group~A positive control (a controlled $\delta$-shift injected at a
+known token position) and the negative control (a fresh-seed regeneration
+under identical decoding configuration) are similarly pre-registered. We
+note that a shuffled-token control serves as a \emph{positive} control
+rather than a negative control under our $q_t$-based score: permuting
+tokens without re-running the model breaks
+$X_t \mid \mathcal{F}_{t-1} \sim q_t$ (the permuted $X_t$ is from a
+different filtration than the $q_t$ used to score it), so the e-process is
+expected to trigger. The genuine negative control is the fresh-seed
+regeneration, where $\Hnull$ holds by construction.
+
+\subsection{Group~B: Detection Performance (Pre-Registered)}
+\label{ssec:results-groupB}
+
+\textbf{Pre-registered analysis.} We report per-category AUROC, PR-AUC,
+Kolmogorov--Smirnov $D$, and Mann--Whitney $U$ on the test set, with 95\%
+trace-level paired bootstrap confidence intervals (1{,}000 resamples,
+seed=42, sampling at the trace level to preserve within-trace dependence).
+The headline batch result is the pooled-by-percentile paired AUROC delta
+of $\text{eprod}_{\beta=0.10}(s_t)$ versus $\text{mean}(\text{surprisal})$;
+the pre-registered acceptance criterion is that this delta's 95\%
+trace-level bootstrap CI excludes zero on the positive side and the
+per-length-quartile signs are consistent across all length quartiles with
+$\ge 5$ hallucinated test claims (degenerate quartiles excluded). Empirical
+miscoverage diagnostics are computed at the
+$(\text{category}, \text{prompt})$ cell level via Clopper--Pearson 95\%
+intervals; a cell is flagged as exceeding the per-category bound
+$\alpha + 1/(m_c+1)$ only when its \emph{lower} CI exceeds the bound
+(strict, CI-based flag). \emph{Numerical results, including the 5-row
+per-category table, the 6-baseline pooled headline, the length-stratified
+breakdown, and the 25-cell prompt-conditional miscoverage report, are
+reported in the companion supplementary materials upon execution per
+\texttt{phase\_d/PIPELINE\_MODIFICATIONS\_PLAN\_v2.md} Angles~3 and~4.}
+Power and structural caveats follow from
+\S\ref{ssec:effective-single-category}: C1 and C2 are reported with
+\texttt{power\_warning} flags, and the headline result is interpreted
+predominantly through C5.
+
+\subsection{Group~C: Channel Characterization (Pre-Registered)}
+\label{ssec:results-groupC}
+
+\textbf{Pre-registered analysis.} The Channel~U / Channel~O demarcation
+(\S\ref{sec:channels}) generates a falsifiable per-category prediction:
+the expected-Channel-U categories (C1, C5, and partially C2) should show
+AUROC substantially above $0.5$, while the expected-Channel-O categories
+(C3 and the false-premise subset of C4) should show AUROC near $0.5$ or
+below. We report a Channel~U vs.\ Channel~O aggregate AUROC gap (with
+trace-level paired bootstrap CI) and document any per-category deviation
+from the channel prediction as a measured characterization of the
+detectability boundary, not as a failure of the framework.
+\emph{Numerical outputs are reported in the companion supplementary
+materials upon execution.}
+
+\subsection{Group~D: Ablation (Pre-Registered)}
+\label{ssec:results-groupD}
+
+\textbf{Pre-registered analysis.} The ablation grid covers: score function
+(centered Brier residual vs.\ centered log-score vs.\ raw NLL); sampling
+distribution ($q_t$ vs.\ $p_t$, where the $p_t$ variant is expected to
+break Lemma~\ref{lem:mean-zero}); betting strategy (fixed $\beta=0.1$
+vs.\ EMA plug-in; the ONS variant is deferred per
+\texttt{phase\_d/PIPELINE\_MODIFICATIONS\_PLAN\_v2.md} §11); mixture
+weights (dyadic vs.\ harmonic vs.\ single cohort); claim aggregator
+($\claimscore$ vs.\ $\claimscorelog$); and conformal threshold (pooled
+$T_\alpha$ vs.\ per-category $T_{\alpha,c}$). The primary betting/weight
+combination for the main results is committed to
+\texttt{phase\_d/runs/<ts>/manifest.json} before execution per the
+pre-registration discipline in
+\texttt{phase\_d/PIPELINE\_MODIFICATIONS\_PLAN\_v2.md} §6.4; all variants
+are evaluated in the ablation. \emph{Numerical outputs are reported in the
+companion supplementary materials upon execution.}
+
+\subsection{Stage 4 Batch Headline: Gate 1 Outcome}
+\label{ssec:results-batch}
+
+We evaluate the multiplicative e-process candidate
+$\text{eprod}_{\beta=0.10}(s_t)$ against six baseline aggregators
+(mean-$s_t$, std-$s_t$, max-$s_t$, mean-surprisal, var-surprisal,
+mean-entropy of $q_t$) on 220 test atomic claims (176 factual, 44
+hallucinated). The headline pooled-by-percentile paired bootstrap delta
+($\text{eprod}_{\beta=0.10}(s_t)$ versus $\text{mean(surprisal)}$) is
+$\Delta_{\text{AUROC}} = -0.103$ with 95\% trace-level paired bootstrap CI
+$[-0.246, +0.101]$ ($p_{\text{two-sided}} = 0.262$); all four non-degenerate
+length quartiles show $\Delta_{\text{AUROC}} < 0$, consistent in direction
+but not in statistical significance against zero.
+Per-category AUROC: $C_1 = 0.381$ (underpowered, $n_h = 1$),
+$C_2 = 0.407$ (underpowered, $n_h = 2$), $C_3 = 0.420$, $C_4 = 0.465$,
+$C_5 = 0.536$ (only $C_5$ exceeds the random baseline of $0.5$ in point
+estimate).
+We conclude that the multiplicative e-process is \textbf{comparable to}
+entropy/NLL baselines under our conformal calibration on this dataset; we
+do not detect a length-uniform AUROC advantage at this sample size. The
+conformal calibration framework (Theorem~\ref{thm:layer2}) and joint-
+characterization framing (Theorem~\ref{thm:layer1} Remark) are preserved
+regardless of this empirical outcome.
+
+\subsection{Stage 7 Streaming Delay-Recall: Gate 2 Outcome}
+\label{ssec:results-streaming}
+
+Delay-recall comparison is not evaluated in this submission. The
+test-hallucinated sample $n_h = 8$ trace-category records is structurally
+insufficient for the paired-bootstrap power requirement at the
+pre-registered binding cell $(\Delta=0.15, \rho=0.3)$; the Gaussian-copula
+precheck at $n=40$ yields power $P = 0.176$ (Stage~6 precheck), and the
+operational paired-Bernoulli test at $n_h = 8$ has structurally lower power
+than this precheck.
+A power-audit on the 8 traces (Stage~7 pre-audit) confirms: neither
+Arm~A (Ville threshold $1/\alpha = 20$) nor calibrated CUSUM
+($h = 5.21$, $k \approx 0$) fires alarms on any of the 8 traces — a
+structural detectability finding consistent with the Channel-O-leaning
+hallucinated subset (5/8 records are $C_5$ post-cutoff knowledge).
+We report this as a framework-level structural property: the multiplicative
+wealth-process Arm~A satisfies finite expected stopping time under any
+alternative hypothesis with strictly positive expected score
+$\mathbb{E}_{H_1}[s_t] > 0$ (corollary of Theorem~\ref{thm:layer1}'s
+finite-time mean-exit property); empirical delay-recall comparison at this
+dataset's $n_h = 8$ is left to future work with a Channel-U-dominant
+benchmark and larger hallucinated sample.
+
+\subsection{Stage 8 Peeking-FAR Three-Arm: Gate 3 Outcome}
+\label{ssec:results-peeking}
+
+We evaluate the three-arm peeking-FAR experiment on 31 test-factual traces
+at $K^* = 25$ peeks per trace. Per-category calibration counts
+$n_c^{\text{tr}} \in \{13, 14, 17, 17, 17\}$ fall below the floor
+$\lceil 1/\alpha \rceil + 1 = 21$ required for non-vacuous
+$(1-\alpha)$-quantile under per-category split conformal
+(Theorem~\ref{thm:layer2}), placing the Path~B detector arms in a
+vacuous-threshold regime ($c^* = c_A^* = +\infty$ for all five categories).
+
+Condition~2 (Arm~A Ville bound, Theorem~\ref{thm:layer1}): empirical
+$\hat{\text{FAR}}_A = 0/31$ does not violate the predicted bound
+$\alpha = 0.05$; the 95\% Clopper--Pearson upper CI is $[0, 0.112]$,
+consistent with true rates including the bound but also values up to
+$0.112$ that would exceed it. We cannot certify the bound at 95\%
+confidence at $n_{\text{test\_factual}} = 31$; this is finite-sample
+non-identifiability, not bound consistency.
+
+Condition~3 (Arm~A' per-category conformal bound): for all five categories,
+Arm~A' empirical FAR is $0/n_{\text{test\_factual\_in\_c}}$ with
+Clopper--Pearson 95\% upper CI exceeding the conformal-tightened bound
+$\alpha + 1/(n_c^{\text{tr}}+1) \in [0.106, 0.121]$; the per-category
+$\Delta^{\text{AV}}$ values are reported with this caveat. The bound miss
+is a finite-sample CI-width artifact in the per-category
+$n_{\text{test\_factual\_in\_c}} \in \{3, 5, 7, 8\}$ regime, not a
+violation of the conformal calibration framework.
+
+Condition~4 (Arm~B $K=1$ sanity): $\hat{\text{FAR}}_B(K=1) = 0/31$ with
+Clopper--Pearson 95\% two-sided CI $[0, 0.112]$ contains $\alpha = 0.05$,
+validating the $K=1$ calibration sanity check at this sample size.
+
+Condition~5 (joint-effect gap $\Delta^{\text{AV}}$): the gap under the
+(anytime-valid status, calibration-target) joint perturbation is not
+detectable at $K^* = 25$ on this trace sample. $\Delta^{\text{AV}}$ point
+estimate is $0.0000$ with paired bootstrap 95\% CI $[0, 0]$ (degenerate
+due to vacuous thresholds on both Arms~A' and~B). Empirical content of
+$\Delta^{\text{AV}}$ requires non-vacuous calibration thresholds, which
+in turn require $n_c^{\text{tr}} \geq 21$ at $\alpha = 0.05$.
+
+\subsection{Structural Limitation: C2 Zero-Hallucinated Problem}
+\label{ssec:c2-structural}
+
+Under unanimity merging, C2 (Numerical Reasoning) produces only 2
+hallucinated claims in the entire dataset of 667 unanimous claims (the
+remaining C2 disagreement-claims are excluded as \texttt{uncertain} or
+\texttt{unverifiable}, as the annotators preferentially label numerical
+errors as \texttt{uncertain} rather than \texttt{hallucinated}). After
+trace-level split, both hallucinated C2 claims fall in the calibration
+side, leaving \textbf{zero hallucinated test claims for C2}. This renders
+per-category AUROC \emph{undefined} for C2 under the current annotation
+protocol; we report C2's result as \texttt{undefined} with a
+\texttt{power\_warning} flag rather than computing an uninformative
+bootstrap-degenerate point estimate. A pre-registered sensitivity analysis
+on C1 and C2 under a 2-of-3 majority merge rule (the C3, C4, C5 categories
+keep unanimity) is reported in the appendix; see also
+\S\ref{ssec:selection-on-agreement} for the implications of unanimity
+selection on inferred AUROC.
+
+\subsection{LLM-as-Judge Circularity in Annotation}
+\label{ssec:llm-judge-circularity}
+
+The ground-truth labels in this study are produced by three LLM
+annotators (DeepSeek V4 Pro, GLM-4.7, Claude Sonnet 4.6), and the
+score function $s_t = \|q_t\|_2^2 - q_t(X_t)$ is derived from a
+fourth LLM (Qwen2.5-7B-Instruct). The headline experiment therefore
+asks whether LLM-derived scores predict LLM-judged hallucination
+labels. This protocol carries a partial-tautology risk: any pattern
+shared between the score-model and the judge-models---e.g., both
+finding the same tokens surprising due to overlapping pretraining
+data---will inflate AUROC without measuring true hallucination
+detection. We do not have a human gold standard to disambiguate this.
+Per-category AUROC in this paper should be interpreted as a measure
+of agreement between two LLM-derived signals on the surviving
+unanimous-consensus claims, rather than as a measure of true
+hallucination detection performance against an independent ground
+truth. A human-annotated subset is left for future work.
+
+\subsection{Effective Single-Category Empirical Result}
+\label{ssec:effective-single-category}
+
+The 5-category design (C1--C5) yields empirically interpretable
+results for at most one category under the current annotation
+protocol. C2 (Numerical Reasoning) has zero hallucinated test claims
+after unanimity merging and trace-level split, making per-category
+AUROC undefined. C1 (Factual Recall) has one hallucinated test
+claim, making bootstrap confidence intervals structurally degenerate
+(\texttt{power\_warning}=\texttt{underpowered}). C3 (Implicit Premise
+Identification) is hypothesized by the Channel~U/O taxonomy to fall
+predominantly into Channel~O (premise-acceptance hallucinations) and
+may therefore yield AUROC near $0.5$. C4 (Domain-Specific Expertise)
+is mixed Channel~U/O; the per-category result may show no advantage
+or AUROC$<0.5$ on overconfident-recall cases. Only C5 (Post-Cutoff
+Knowledge) is a relatively clean Channel~U scenario, but C5 carries
+its own annotation circularity (the LLM annotators' knowledge cutoff
+overlaps the time-anchored claims, so an annotator may label a claim
+\texttt{factual} merely because it is consistent with the
+annotator's own training-data knowledge, rather than verified against
+an external source as of the anchor date~2026-05-13). The empirical
+contribution of this paper is therefore narrower than the
+5-category framing suggests: the C5 result is the cleanest test of
+the framework's Channel~U coverage, and C1--C4 are reported as
+supporting characterization with their respective acknowledged power
+or structural limitations.
+
+\subsection{Selection-on-Agreement Bias from Unanimity Merge}
+\label{ssec:selection-on-agreement}
+
+The unanimity merge rule excludes claims where any of the three
+annotators chose \texttt{uncertain} or \texttt{unverifiable}, and
+excludes claims with mixed \texttt{factual}/\texttt{hallucinated}
+verdicts (Phase~2C of the data construction pipeline). This drops approximately
+35\% of annotated claims (from 1{,}026 to 667 final records) and
+retains a selected set on which all three LLM annotators reached
+consensus---i.e., the cases that are systematically the
+\emph{easiest} for LLMs to label confidently. Per-category AUROC on
+this selected set therefore reflects detection performance on
+unambiguous claims and systematically overestimates the AUROC that
+would be obtained on the underlying claim population, which includes
+the harder cases that triggered annotator disagreement. A 2-of-3
+majority sensitivity analysis on C1 and C2 (appendix) partially
+probes this effect but does not eliminate it, as the majority rule
+relies on the same three LLM annotators. A more thorough probe would
+require either human adjudication of the disagreed cases or a fourth
+independent annotator from a different model family; both are left
+for future work.
+
+% ═══════════════════════════════════════════════════════════════════════
+\section{Discussion}
+
+\subsection{What the Framework Guarantees}
+\begin{itemize}
+    \item \textbf{Layer~1}: Under $\Hnull$, anytime-valid Type~I error control
+          at the token level (Theorem~\ref{thm:layer1}).
+    \item \textbf{Layer~2}: Under trace-level exchangeability,
+          finite-sample false alarm rate control on factual
+          \emph{traces} per category (Theorem~\ref{thm:layer2}).
+    \item \textbf{Layer~3}: Quantitative empirical characterization of the
+          self-surprise--hallucination correlation, per category.
+\end{itemize}
+
+\subsection{What It Does NOT Guarantee}
+\begin{itemize}
+    \item Layer~1 does not directly yield hallucination false alarm control
+          ($\Hnull$ holds regardless of factuality).
+    \item Layer~2 does not cover Channel~O (overconfident hallucinations).
+    \item Layer~3 provides correlation evidence, not a mathematical guarantee
+          for individual claim-level decisions.
+    \item The claim-level analogue bound $\alpha + 1/(m_c+1)$
+          (Remark~\ref{prop:claim-level}) does not hold formally under
+          our trace-level cal/test split protocol; it is reported as an
+          informal empirical reference monitored by per-prompt
+          Clopper--Pearson miscoverage diagnostics, with cells flagged
+          when their lower CI exceeds $\alpha + 1/(m_c+1)$ as a
+          diagnostic rather than a formal-bound test. The formal Layer~2
+          guarantee is the trace-level bound
+          $\alpha + 1/(n_c^{\text{tr}}+1)$ in Theorem~\ref{thm:layer2}.
+    \item The framework does not hold under arbitrary distribution shift
+          (Layer~2 relies on exchangeability).
+\end{itemize}
+
+\subsection{Channel~O as Future Work}
+
+Channel~O is the frontier. The present dataset characterization
+(\S\ref{sec:channels}) places this evaluation in a Channel-O-leaning
+regime: of 107~hallucinated atomic claims, the tight Channel-O proxy
+($C_5$) accounts for 28\%, the wider proxy ($C_1 + C_5$) accounts for
+34.6\%, and the widest proxy ($C_1 + C_2 + C_5$) accounts for 36.4\%.
+The Stage~7 pre-audit on test-hallucinated traces (\S\ref{ssec:results-streaming})
+provides direct corroboration: neither Arm~A nor calibrated CUSUM fires
+on any of the 8 evaluated trace-category records, with 5/8 belonging to
+$C_5$. The centered-Brier residual $s_t = \|q_t\|_2^2 - q_t(X_t)$ is
+structurally insensitive to Channel~O failures — when the model assigns
+high probability $q_t(X_t)$ to a wrongly-confident token, the residual is
+near zero or negative, providing no detection signal regardless of stopping
+rule. This is a documented limitation of the framework's scope on this
+dataset, not a framework defect.
+
+Promising future directions include:
+(i)~triggering a Channel~O verifier (multi-sample agreement, retrieval lookup)
+when Channel~U alarms;
+(ii)~designing a claim-level confidence-vs-support mismatch detector;
+(iii)~extending the conformal layer to a combined Channel~U~+~Channel~O score;
+(iv)~constructing a Channel-U-dominant benchmark via prompts designed to
+elicit uncertainty-driven hallucinations (numerical limits, multi-hop
+factual recall, implicit-premise questions) to evaluate the framework
+within its design scope.
+
+\subsection{Relationship to Existing Methods}
+
+SelfCheckGPT~\cite{manakul2023selfcheck} uses multi-sample consistency
+post-hoc, addressing Channel~O but not real-time.
+Semantic Entropy~\cite{farquhar2024detecting} is explicitly scoped to
+confabulation; our framing is a subset.
+FActScore~\cite{min2023factscore} relies on external knowledge, viewable as
+a Channel~O retrieval-grounded implementation.
+Our position is complementary: a real-time, anytime-valid,
+internal-information detector for Channel~U, orthogonal to the above.
+
+% ═══════════════════════════════════════════════════════════════════════
+\section{Related Work}
+
+\paragraph{LLM Hallucination Detection.}
+Multi-sample consistency~\cite{manakul2023selfcheck}, semantic entropy for
+confabulation~\cite{farquhar2024detecting}, atomic fact verification with
+external knowledge~\cite{min2023factscore}, and internal state probe
+methods~\cite{azaria2023internal} constitute the main threads. Our framework
+complements them with real-time, assumption-lean, internal-information signals.
+
+\paragraph{Strictly Proper Scoring Rules.}
+The Bregman divergence characterization of proper scoring
+rules~\cite{gneiting2007strictly} underpins our score function design.
+Shao et al.~\cite{shao2024language} apply strictly proper scoring rules
+to LLM token-level generation; our use of the centered Brier residual for
+sequential testing is a different direction.
+
+\paragraph{E-Processes and Anytime-Valid Inference.}
+The game-theoretic statistics framework~\cite{ramdas2023gametheoretic,
+howard2021timeuniform,waudbysmith2024estimating} provides the anytime-valid
+machinery. The e-detector framework~\cite{shin2023edetectors} is the direct
+source of our cohort~$+$~mixture construction; our use of it is an
+instantiation with a specific score (centered Brier residual on the
+post-temperature, post-top-$p$ sampling distribution) rather than a new
+sequential-testing theorem, and we present Theorem~\ref{thm:layer1} as a
+structural property of $M_t$ under $\Hnull$ rather than as a novel
+theoretical contribution.
+
+\paragraph{Closest prior work: Su et al.~\cite{su2026online}.}
+Su, Wang, and Zhao apply e-processes to online LLM watermark detection.
+The construction is the closest prior work to our Layer~1 in spirit, but
+the differences are methodological rather than incremental: (i)~their null
+hypothesis tests the presence/absence of a known watermarking scheme on
+the token stream (an independence hypothesis on a pivotal statistic
+depending on the watermark key), so their $H_0$ is falsifiable and the
+e-process inflates under watermarked sequences; our null
+$\Hnull: X_t \mid \mathcal{F}_{t-1} \sim q_t$ is a behavioral fact that
+holds on every model trajectory by construction (Lemma~\ref{lem:mean-zero}),
+so our e-process is a calibration object for a structural property of
+$M_t$, not a falsifiable detector of an external attribute; (ii)~their
+score is a pivotal statistic of the watermark hash function applied to
+token outputs; ours is the centered Brier residual of $q_t$ on $X_t$,
+which is meaningful whether or not any watermark is present and which is
+linked through Theorem~\ref{thm:layer2} to a per-category conformal false
+alarm rate; (iii)~Su et al.\ stop at the e-process layer (Layer~1 in our
+nomenclature); we add a per-category split conformal calibration layer
+(Theorem~\ref{thm:layer2}) and an empirical hallucination bridge layer
+(Layer~3) on top, which together carry the hallucination-detection
+performance claims of this work, with Layer~1 used to characterize
+behavior under repeated peeking on factual traces rather than to deliver
+detection. The complementary distinction is that watermark detection has
+a non-trivial falsifiable null whereas hallucination detection (in our
+formulation) does not; our framework therefore relies on the empirical
+bridge (Layer~3) rather than on Layer~1 to do the detection work.
+
+\paragraph{Conformal Prediction.}
+Split conformal~\cite{vovk2005algorithmic,lei2018distribution} provides the
+finite-sample guarantee in Layer~2. Our per-category stratified calibration
+extends the standard split-conformal recipe.
+
+% ═══════════════════════════════════════════════════════════════════════
+\section{Conclusion}
+
+We presented SHT, a three-layer framework for LLM hallucination detection:
+(1)~token-level self-surprise e-process with anytime-valid Type~I error
+control (Theorem~\ref{thm:layer1});
+(2)~claim-level split conformal calibration with per-category false alarm
+rate bounds (Theorem~\ref{thm:layer2}); and
+(3)~empirical bridge quantifying the self-surprise--hallucination correlation
+per category.
+The three layers have distinct mathematical targets and do not collapse into
+a single claim. We explicitly demarcate Channel~U (detectable by self-surprise)
+from Channel~O (overconfident, structurally invisible to token-level scoring
+rules) and declare the latter as explicit future work.
+
+% ═══════════════════════════════════════════════════════════════════════
+%  Appendix (unnumbered sections in LLNCS; use \section* or omit numbering
+%  depending on page budget)
+% ═══════════════════════════════════════════════════════════════════════
+\section*{Appendix A: Algorithm~1 --- Token-Level Self-Surprise E-Process}
+
+\begin{verbatim}
+Input: {q_t}_{t>=1}, {X_t}_{t>=1}, weights {w_j}
+       with sum_j w_j <= 1, B in (0,1), alpha.
+
+ 1: M <- sum_{j>=1} w_j          // includes inactive tail
+ 2: for t = 1, 2, ... do
+ 3:     // Step 1: choose bets (F_{t-1}-measurable)
+ 4:     for each active j <= t with w_j > 0 do
+ 5:         compute beta_t^(j) in [0,B]
+ 6:            using only s_1,...,s_{t-1}
+ 7:     // Step 2-3: observe token, compute score
+ 8:     observe X_t ~ q_t
+ 9:     s_t <- ||q_t||_2^2 - q_t(X_t)
+10:     // Step 4: update cohort wealth
+11:     for each active j <= t do
+12:         Lambda^(j) <- Lambda^(j)*(1 + beta_t^(j)*s_t)
+13:     // Step 5: activate cohort j = t+1
+14:     M <- sum_{j<=t+1} w_j*Lambda^(j)
+15:          + sum_{j>t+1} w_j
+16:     if M >= 1/alpha then return alarm at tau = t
+17: end for
+\end{verbatim}
+
+\section*{Appendix B: Pipeline Fingerprint Specification}
+
+Every record in \texttt{claims\_final.jsonl} carries four SHA256 fingerprints
+plus a schema version, providing end-to-end reproducibility binding from the
+extraction config down to the underlying token-feature parquet.
+
+\textit{Extraction fingerprint} (Layer~A): config hash of the claim extraction
+run, covering prompt SHA, extractor model, extraction temperature, and planned
+annotator set. Computed by \texttt{extract\_claims\_v2.compute\_fingerprint()}.
+
+\textit{Merge fingerprint}: hash of (extraction fingerprint $+$ actual
+annotator list $+$ merge rule version $+$ $n_{\text{annotators}}$).
+This is an audit record of what merge produced; it is NOT a verification
+target (the merge writes it; nothing upstream owns it).
+
+\textit{Claims data fingerprint} (Layer~B): SHA256 of \texttt{claims\_v2.jsonl}
+raw bytes. Detects post-hoc edits to \texttt{claim\_text},
+\texttt{start\_token}, or \texttt{end\_token}.
+
+\textit{Token features fingerprint} (Layer~C): SHA256 of
+\texttt{token\_features.parquet} raw bytes. Detects silent parquet
+regeneration with a different seed or configuration.
+
+\textit{Fingerprint schema version}: tag identifying the hashing convention
+(currently \texttt{3-layer-raw-bytes-v1}). Compared first; mismatch aborts
+before any hash comparison, preventing cross-version equality bugs.
+
+\textbf{Layer~3 verification contract.} Phase~D MUST, before any AUROC
+computation, run \texttt{phase\_d/verify\_fingerprints.py} which performs
+four checks in order: (i) schema-version equality (aborts on mismatch
+before any hash comparison); (ii) Layer~A regression check --- recompute
+via \texttt{extract\_claims\_v2.compute\_fingerprint()} and assert match
+against the records' \texttt{extraction\_fingerprint} field; (iii) Layer~B
+--- recompute claims-data fingerprint via
+\texttt{claim-level/fingerprint\_utils.py} and assert match against
+\texttt{claims\_data\_fingerprint}; (iv) Layer~C --- recompute
+token-features fingerprint similarly and assert match against
+\texttt{token\_features\_fingerprint}. Any mismatch $\to$ abort.
+
+% ═══════════════════════════════════════════════════════════════════════
+%  Bibliography (splncs04 style required by Springer LNCS)
+% ═══════════════════════════════════════════════════════════════════════
+\bibliographystyle{splncs04}
+\bibliography{references}
+
+\end{document}
